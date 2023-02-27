@@ -832,3 +832,291 @@ org.springframework.boot.orm.jpa.hibernate.SpringPhysicalNamingStrategy
     - web
 
 **개발 순서: 서비스, 리포지토리 계층을 개발하고, 테스트 케이스를 작성해서 검증, 마지막에 웹 계층을 적용합시다.**
+
+
+# ==== 2. 회원 도메인 개발 ====
+
+## 1. 회원 도메인 개발
+
+### **회원 리포지토리 개발**
+
+회원 리포지토리 코드 `MemberRepository`
+
+```java
+@Repository
+public class MemberRepository {
+    
+    @PersistenceContext
+    private EntityManager em;
+    
+    public void save(Member member) {
+        em.persist(member);
+    }
+    
+    public Member findOne(Long id) {
+        return em.find(Member.class, id);
+    }
+    
+    public List<Member> findAll() {
+        return em.createQuery("select m from Member m", Member.class)
+            .getResultList();
+    }
+    
+    public List<Member> findByName(String name) {
+        return em.createQuery("select m from Member m where m.name = :name", Member.class)
+            .setParameter("name", name)
+            .getResultList();
+    }
+}
+```
+
+**기술 설명**
+
+`@Repository` : 스프링 빈으로 등록, JPA 예외를 스프링 기반 예외로 예외 변환합니다.
+
+`@PersistenceContext` : 엔티티 메니저( `EntityManager` ) 주입
+
+- EntityManager : JPA는 스레드가 하나 생성될 때마다 `EntityManagerFactory`에서 `EntityManager`를 생성합니다.
+- EntityManager 는 내부적으로 DB 커넥션 풀을 사용하여 DB와 연결됩니다.
+
+**기능 설명**
+
+`save()` : `em.persist()`는 영속성 컨텍스트를 통해서 엔티티를 영속화합니다.
+
+`findOne()`
+
+`findAll()`: JPQL을 호출하여 JPA에서 제공하는 메서드 호출만으로 작성할 수 없는 쿼리를 작성합니다.
+
+`findByName()`
+
+## 2. **회원 서비스 개발**
+
+회원 서비스 코드 `MemberService`
+
+```java
+@Service
+@Transactional(readOnly = true)
+@RequiredArgsConstructor
+public class MemberService {
+
+    private final MemberRepository memberRepository;
+    /**
+     * 회원가입
+     */
+    @Transactional //변경
+    public Long join(Member member) {
+
+        validateDuplicateMember(member); //중복 회원 검증
+        memberRepository.save(member);
+        return member.getId();
+    }
+
+    private void validateDuplicateMember(Member member) {
+
+        List<Member> findMembers = memberRepository.findByName(member.getName());
+        if (!findMembers.isEmpty()) {
+            throw new IllegalStateException("이미 존재하는 회원입니다.");
+        }
+    }
+
+    /**
+     * 전체 회원 조회
+     */
+    public List<Member> findMembers() {
+        return memberRepository.findAll();
+    }
+
+    public Member findOne(Long memberId) {
+        return memberRepository.findOne(memberId);
+    }
+}
+```
+
+**기술 설명**
+
+`@Service`
+
+`@Transactional` : 트랜잭션, 영속성 컨텍스트
+
+- `readOnly=true` : 데이터의 변경이 없는 읽기 전용 메서드에 사용합니다. 영속성 컨텍스트를 플러시 하지 않으므로 약간의 성능이 향상될 수 있습니다.(읽기 전용에는 다 적용) 데이터베이스 드라이버가 지원하면 DB에서 성능 향상이 향상됩니다.
+
+`@Autowired`
+
+- 생성자 Injection 으로 많이 사용합니다, 생성자가 하나면 생략 가능합니다.
+
+> 참고 - 실무에서는 검증 로직이 있어도 멀티 쓰레드 상황을 고려해서 회원 테이블의 회원명 컬럼에 유니크 제약 조건을 추가하는 것이 안전하다.
+> 
+
+> 참고: 스프링 필드 주입 대신에 생성자 주입을 사용하자.
+> 
+
+**필드 주입**
+
+```java
+public class MemberService {
+    
+    @Autowired
+    MemberRepository memberRepository;
+    ...
+}
+```
+
+**생성자 주입**
+
+```java
+public class MemberService {
+    
+    private final MemberRepository memberRepository;
+    public MemberService(MemberRepository memberRepository) {
+        this.memberRepository = memberRepository;
+    }
+    ...
+}
+```
+
+생성자 주입 방식을 권장합니다. 변경 불가능한 안전한 객체를 생성할 수 있습니다.
+
+만약 생성자가 하나면 `@Autowired` 를 생략할 수 있습니다.
+
+`final` 키워드를 추가하면 컴파일 시점에 `memberRepository` 를 설정하지 않는 오류를 체크할 수 있습니다. (보통 기본 생성자를 추가할 때 발견됩니다.)
+
+**lombok**
+
+```java
+@RequiredArgsConstructor
+public class MemberService {
+    
+    private final MemberRepository memberRepository;
+    ...
+}
+```
+
+> 참고 - 스프링 데이터 JPA를 사용하면 EntityManager 도 주입 가능
+> 
+
+```java
+@Repository
+@RequiredArgsConstructor
+public class MemberRepository {
+    
+    private final EntityManager em;
+    ...
+}
+```
+
+## 3. **회원 기능 테스트**
+
+### **테스트 요구사항**
+
+- 회원가입을 성공해야 한다.
+- 회원가입 할 때 같은 이름이 있으면 예외가 발생해야 한다.
+
+회원가입 테스트 코드 `MemberServiceTest`
+
+```java
+package jpabook.jpashop.service;
+
+import jpabook.jpashop.domain.Member;
+import jpabook.jpashop.repository.MemberRepository;
+import org.junit.Test;
+import org.junit.runner.RunWith;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.test.context.junit4.SpringRunner;
+import org.springframework.transaction.annotation.Transactional;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.fail;
+
+@RunWith(SpringRunner.class)
+@SpringBootTest
+@Transactional
+public class MemberServiceTest {
+    
+    @Autowired MemberService memberService;
+    @Autowired MemberRepository memberRepository;
+    
+    @Test
+    public void 회원가입() throws Exception {
+        
+        //Given
+        Member member = new Member();
+        member.setName("kim");
+        
+        //When
+        Long saveId = memberService.join(member);
+        
+        //Then
+        assertEquals(member, memberRepository.findOne(saveId));
+    }
+    
+    @Test(expected = IllegalStateException.class)
+    public void 중복_회원_예외() throws Exception {
+        //Given
+        Member member1 = new Member();
+        member1.setName("kim");
+        
+        Member member2 = new Member();
+        member2.setName("kim");
+        
+        //When
+        memberService.join(member1);
+        memberService.join(member2); //예외가 발생해야 한다.
+        
+        //Then
+        fail("예외가 발생해야 한다.");
+    }
+}
+```
+
+**기술 설명**
+
+`@RunWith(SpringRunner.class)` : 스프링과 테스트 통합
+
+- 전체 application context 를 로딩하는 것이 아닌@Autowired, @MockBean 에 해당되는 것들에만 application.context 를 로딩하게 된다.
+
+`@SpringBootTest` : 스프링 부트 띄우고 테스트합니다. (이게 없으면 `@Autowired` 다 실패)
+
+`@Transactional` : 반복 가능한 테스트를 지원합니다. 각각의 테스트를 실행할 때마다 트랜잭션을 시작하고 테스트가 끝나면 트랜잭션을 강제로 롤백 (이 어노테이션이 테스트 케이스에서 사용될 때만 롤백)
+
+**테스트 케이스 작성 고수 되는 마법: Given, When, Then**
+
+(http://martinfowler.com/bliki/GivenWhenThen.html) 
+
+이 방법이 필수는 아니지만 이 방법을 기본으로 해서 다양하게 응용하는 것을 권장합니다.
+
+### **테스트 케이스를 위한 설정**
+
+테스트는 케이스 격리된 환경에서 실행하고, 끝나면 데이터를 초기화하는 것이 좋습니다. 
+
+그런 면에서 메모리 DB를 사용하는 것이 가장 이상적입니다. 
+
+추가로 테스트 케이스를 위한 스프링 환경과, 일반적으로 애플리케이션을 실행하는 환경은 보통 다르므로 설정 파일을 다르게 사용하는 게 좋습니다. 다음과 같이 간단하게 테스트용 설정 파일을 추가하면 됩니다.
+
+`test/resources/application.yml`
+
+```yaml
+spring:
+#  datasource:
+#    url: jdbc:h2:mem:testdb
+#    username: sa
+#    password:
+#    driver-class-name: org.h2.Driver
+#  jpa:
+#    hibernate:
+#    ddl-auto: create
+#  properties:
+#    hibernate:
+#      show_sql: true
+#      format_sql: true
+#  open-in-view: false
+
+logging.level:
+  org.hibernate.SQL: debug
+#  org.hibernate.type: trace
+```
+
+이제 테스트에서 스프링을 실행하면 이 위치에 있는 설정 파일을 읽습니다. (만약 이 위치에 없으면 `src/resources/application.yml` 을 읽습니다.)
+
+스프링 부트는 datasource 설정이 없으면, 기본적으로 메모리 DB를 사용하고, driver-class도 현재 등록된 라이브러리를 보고 찾아줍니다. 추가로 `ddl-auto` 도 `create-drop` 모드로 동작합니다. 
+
+따라서 데이터소스나, JPA 관련된 별도의 추가 설정을 하지 않아도 됩니다.
