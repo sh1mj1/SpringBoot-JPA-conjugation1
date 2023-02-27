@@ -1120,3 +1120,156 @@ logging.level:
 스프링 부트는 datasource 설정이 없으면, 기본적으로 메모리 DB를 사용하고, driver-class도 현재 등록된 라이브러리를 보고 찾아줍니다. 추가로 `ddl-auto` 도 `create-drop` 모드로 동작합니다. 
 
 따라서 데이터소스나, JPA 관련된 별도의 추가 설정을 하지 않아도 됩니다.
+
+
+- 상품 엔티티 개발(비즈니스 로직 추가)
+- 상품 리포지토리 개발
+- 상품 서비스 개발
+
+# ==== 3. 상품 도메인 개발 ====
+
+이제  상품 도메인을 개발해보도록 하겠습니다. 구현 기능과 개발 순서는 아래와 같습니다.
+
+**구현 기능**
+
+- 상품 등록
+- 상품 목록 조회
+- 상품 수정
+
+**순서**
+
+- 상품 엔티티 개발(비즈니스 로직 추가)
+- 상품 리포지토리 개발
+- 상품 서비스 개발
+- 상품 기능 테스트
+
+## 1. **상품 엔티티 개발(비즈니스 로직 추가)**
+
+상품 엔티티 코드 `Item`
+
+```java
+@Entity
+@Inheritance(strategy = InheritanceType.SINGLE_TABLE)
+@DiscriminatorColumn(name = "dtype")
+@Getter @Setter
+public abstract class Item {
+    
+    @Id @GeneratedValue
+    @Column(name = "item_id")
+    private Long id;
+    
+    private String name;
+    private int price;
+    private int stockQuantity;
+    
+    @ManyToMany(mappedBy = "items")
+    private List<Category> categories = new ArrayList<Category>();
+    
+    //==비즈니스 로직==//
+    public void addStock(int quantity) {
+        this.stockQuantity += quantity;
+    }
+    
+    public void removeStock(int quantity) {
+        int restStock = this.stockQuantity - quantity;
+        if (restStock < 0) {
+            throw new NotEnoughStockException("need more stock");
+        }
+        this.stockQuantity = restStock;
+    }
+}
+```
+
+예외 추가 `NotEnoughStockException`
+
+```java
+public class NotEnoughStockException extends RuntimeException {
+    
+    public NotEnoughStockException() {
+    }
+    
+    public NotEnoughStockException(String message) {
+        super(message);
+    }
+    
+    public NotEnoughStockException(String message, Throwable cause) {
+        super(message, cause);
+    }
+    
+    public NotEnoughStockException(Throwable cause) {
+        super(cause);
+    }
+}
+```
+
+**비즈니스 로직 분석**
+
+`addStock()` 메서드는 파라미터로 넘어온 수만큼 재고를 늘립니다. 이 메서드는 재고가 증가하거나 상품 주문을 취소해서 재고를 다시 늘려야 할 때 사용합니다.
+
+`removeStock()` 메서드는 파라미터로 넘어온 수만큼 재고를 줄인다. 만약 재고가 부족하면 예외가 발생합니다. 주로 상품을 주문할 때 사용합니다.
+
+## 2. **상품 리포지토리 개발**
+
+상품 리포지토리 코드 `ItemRepository`
+
+```java
+@Repository
+@RequiredArgsConstructor
+public class ItemRepository {
+    
+    private final EntityManager em;
+    
+    public void save(Item item) {
+        if (item.getId() == null) {
+            em.persist(item);
+        } else {
+            em.merge(item);
+        }
+    }
+    
+    public Item findOne(Long id) {
+        return em.find(Item.class, id);
+    }
+    
+    public List<Item> findAll() {
+        return em.createQuery("select i from Item i",Item.class).getResultList();
+	}
+}
+```
+
+**기능 설명**
+
+`save()`
+
+- `id` 가 없으면 신규로 보고 `persist()` 실행합니다.
+- `id` 가 있으면 이미 데이터베이스에 저장된 엔티티를 수정한다고 보고, `merge()` 를 실행합니다.
+
+## 3. **상품 서비스 개발**
+
+상품 서비스 코드 `ItemService`
+
+```java
+@Service
+@Transactional(readOnly = true)
+@RequiredArgsConstructor
+public class ItemService {
+    
+    private final ItemRepository itemRepository;
+    
+    @Transactional
+    public void saveItem(Item item) {
+        itemRepository.save(item);
+    }
+    
+    public List<Item> findItems() {
+        return itemRepository.findAll();
+    }
+    
+    public Item findOne(Long itemId) {
+        return itemRepository.findOne(itemId);
+    }
+}
+```
+
+`ItemService` 는 상품 리포지토리에 단순히 위임만 하는 클래스입니다.
+
