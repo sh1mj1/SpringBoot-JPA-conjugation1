@@ -2355,3 +2355,116 @@ public class ItemService {
 }
 ```
 
+## 8. **상품 주문**
+
+상품 주문 컨트롤러 `OrderController`
+
+```java
+@Controller
+@RequiredArgsConstructor
+public class OrderController {
+    
+    private final OrderService orderService;
+    private final MemberService memberService;
+    private final ItemService itemService;
+    
+    @GetMapping(value = "/order")
+    public String createForm(Model model) {
+        
+        List<Member> members = memberService.findMembers();
+        List<Item> items = itemService.findItems();
+        
+        model.addAttribute("members", members);
+        model.addAttribute("items", items);
+        
+        return "order/orderForm";
+    }
+    
+    @PostMapping(value = "/order")
+    public String order(@RequestParam("memberId") Long memberId,
+                        @RequestParam("itemId") Long itemId, 
+                        @RequestParam("count") int count) {
+        
+        orderService.order(memberId, itemId, count);
+        return "redirect:/orders";
+    }
+}
+```
+
+**주문 폼 이동**
+
+- 메인 화면에서 상품 주문을 선택하면 `/order` 를 GET 방식으로 호출합니다.
+- `OrderController` 의 `createForm()` 메서드를 실행합니다.
+- 주문 화면에는 주문할 고객정보와 상품 정보가 필요하므로 `model` 객체에 담아서 뷰에 넘겨줍니다.
+
+**주문 실행**
+
+- 주문할 회원과 상품 그리고 수량을 선택해서 Submit 버튼을 누르면 `/order` URL을 POST 방식으로 호출합니다.
+- 컨트롤러의 `order()` 메서드를 실행합니다.
+- 이 메서드는 고객 식별자( `memberId` ), 주문할 상품 식별자( `itemId` ), 수량( `count` ) 정보를 받아서 주문 서비스에 주문을 요청합니다.
+- 주문이 끝나면 상품 주문 내역이 있는 `/orders` URL로 리다이렉트합니다.
+
+커맨드성 로직들은 Controller 에서는 식별자만 넘겨주고 Service 단에서 핵심 로직들을 수행하는 게 좋습니다.
+
+트랜잭션 내부에서 관리되고 엔티티들이 영속 상태인데 Controller 단에서 엔티티를 파라미터로 받으면 해당 엔티티는 준영속 상태가 되기 때문에 부작용(side-effect) 을 유도할 수 있습니다.
+
+![Screenshot 2023-02-28 at 4.41.45 PM.png](https://s3-us-west-2.amazonaws.com/secure.notion-static.com/4dbda53e-4a2a-4a84-bad3-387901f1df5a/Screenshot_2023-02-28_at_4.41.45_PM.png)
+
+![Screenshot 2023-02-28 at 4.41.55 PM.png](https://s3-us-west-2.amazonaws.com/secure.notion-static.com/79f4807c-af92-4047-8b80-a9e00d3719c8/Screenshot_2023-02-28_at_4.41.55_PM.png)
+
+![Screenshot 2023-02-28 at 4.42.15 PM.png](https://s3-us-west-2.amazonaws.com/secure.notion-static.com/8a27732d-32ac-4a9a-b3f2-1bb81cc472be/Screenshot_2023-02-28_at_4.42.15_PM.png)
+
+`resources/templates/order/orderForm.html`
+
+타임리프 코드는 깃허브 참조
+
+## 9. **주문 목록 검색, 취소**
+
+`OrderController` 의 `orderList()` 메서드 추가
+
+```java
+@Controller
+@RequiredArgsConstructor
+public class OrderController {
+    
+    @GetMapping(value = "/orders")
+    public String orderList(@ModelAttribute("orderSearch") OrderSearch orderSearch, Model model) {
+        List<Order> orders = orderService.findOrders(orderSearch);
+        model.addAttribute("orders", orders);
+        return "order/orderList";
+    }
+}
+```
+
+`OrderController` 의 `cancelOrder()` 메서드 추가
+
+```java
+@Controller
+@RequiredArgsConstructor
+public class OrderController {
+    
+    @PostMapping(value = "/orders/{orderId}/cancel")
+    public String cancelOrder(@PathVariable("orderId") Long orderId) {
+        orderService.cancelOrder(orderId);
+        return "redirect:/orders";
+    }
+}
+```
+
+`resources/templates/order/orderList.html`
+
+타임리프 코드는 깃허브 참조
+
+![Screenshot 2023-02-28 at 4.54.44 PM.png](https://s3-us-west-2.amazonaws.com/secure.notion-static.com/49621598-7219-4d4a-bac1-796e37fc1c1e/Screenshot_2023-02-28_at_4.54.44_PM.png)
+
+![Screenshot 2023-02-28 at 4.55.26 PM.png](https://s3-us-west-2.amazonaws.com/secure.notion-static.com/8bbd6907-917a-4f42-abd2-34bcfa14d631/Screenshot_2023-02-28_at_4.55.26_PM.png)
+
+![Screenshot 2023-02-28 at 4.55.39 PM.png](https://s3-us-west-2.amazonaws.com/secure.notion-static.com/c2ba8cc6-4eff-4982-b7b2-f6155f64a123/Screenshot_2023-02-28_at_4.55.39_PM.png)
+
+![Screenshot 2023-02-28 at 4.56.07 PM.png](https://s3-us-west-2.amazonaws.com/secure.notion-static.com/e4a05c29-0792-48b7-9005-e76de2606a3a/Screenshot_2023-02-28_at_4.56.07_PM.png)
+
+![Untitled](https://s3-us-west-2.amazonaws.com/secure.notion-static.com/b51c3f8c-a295-4cfa-bd24-f6f196dfecf1/Untitled.png)
+
+![Screenshot 2023-02-28 at 4.56.43 PM.png](https://s3-us-west-2.amazonaws.com/secure.notion-static.com/422713a9-2dc6-4a10-baaf-89ede0970eaf/Screenshot_2023-02-28_at_4.56.43_PM.png)
+
+이렇게 해서 간단한 웹 애플리케이션을 만들어 보았습니다.
