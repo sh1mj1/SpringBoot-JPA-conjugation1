@@ -1871,3 +1871,315 @@ JPA Criteria에 비해 알아보기 쉽고 Java 코드이기 때문에 오타가
 
 오픈소스인 Querydsl 을 실제로 사용하기 위한 라이브러리와 사용법 등은 다음 글에서 설명하겠습니다.
 
+# ==== 5. 웹 계층 개발 ====
+
+이번에 구현할 부분들은 아래와 같습니다.
+
+**구현 기능**
+
+- 홈 화면
+- 회원 기능
+    - 회원 등록
+    - 회원 조회
+- 상품 기능
+    - 상품 등록
+    - 상품 수정
+    - 상품 조회
+- 주문 기능
+    - 상품 주문
+    - 주문 내역 조회
+    - 주문 취소
+
+## 1. **홈 화면과 레이아웃**
+
+홈 컨트롤러 등록 `HomeController`
+
+```java
+package jpabook.jpashop.web;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.stereotype.Controller;
+import org.springframework.web.bind.annotation.RequestMapping;
+@Controller
+@Slf4j
+public class HomeController {
+    @RequestMapping("/")
+    public String home() {
+        log.info("home controller");
+        return "home";
+    }
+}
+```
+
+스프링 부트 타임리프 기본 설정 `resources/application.yml`
+
+```yaml
+spring:
+  thymeleaf:
+    prefix: classpath:/templates/
+    suffix: .html
+```
+
+스프링 부트 타임리프는 viewName 으로 매핑합니다.
+
+- `resources:templates/` +{ViewName}+ `.html`
+- `resources:templates/home.html`
+
+반환한 문자( `home` )과 스프링부트 설정인 `prefix` , `suffix` 정보를 사용해서 렌더링할 뷰( `html` )를 찾습니다.
+
+> 참고 - Hierarchical-style layouts 예제에서는 뷰 템플릿을 최대한 간단하게 설명하려고, header , footer 같은 템플릿 파일을 반복해서 포함합니다. 다음 링크의 Hierarchical-style layouts을 참고하면 이런 부분도 중복을 제거할 수 있다. 
+
+https://www.thymeleaf.org/doc/articles/layouts.html
+> 
+
+> 참고 - 뷰 템플릿 변경사항을 서버 재시작 없이 즉시 반영할 수 있습니다.
+> 
+> 1. spring-boot-devtools 추가
+> 2. html 파일 build-> Recompile
+
+### **view 리소스 등록**
+
+이쁜 디자인을 위해 부트스트랩을 사용하겠습니다. (v4.3.1) (https://getbootstrap.com/)
+
+- `resources/static` 하위에 `css` , `js` 복사
+- `resources/static/css/jumbotron-narrow.css` 추가
+
+`resources/static/css/jumbotron-narrow.css`
+
+그리고  `resources/templates/fragments` 경로에 `header.html` , `bodyHeader.html` , `footer.html` 을 두고 thymeleaf 의 replace 기능을 이용하여 layout 을 적용해주었습니다.
+
+**코드는 깃허브 참조.**
+
+## 2. **회원 등록**
+
+폼 객체를 사용해서 화면 계층과 서비스 계층을 명확하게 분리합니다.
+
+회원 등록 폼 객체 `MemberForm`
+
+```java
+@Getter @Setter
+public class MemberForm {
+    @NotEmpty(message = "회원 이름은 필수 입니다")
+    private String name;
+    
+    private String city;
+    private String street;
+    private String zipcode;
+}
+```
+
+회원 등록 컨트롤러 `MemberController`
+
+```java
+@Controller
+@RequiredArgsConstructor
+public class MemberController {
+    
+    private final MemberService memberService;
+    
+    @GetMapping(value = "/members/new")
+    public String createForm(Model model) {
+        model.addAttribute("memberForm", new MemberForm());
+        return "members/createMemberForm";
+    }
+    
+    @PostMapping(value = "/members/new")
+    public String create(@Valid MemberForm form, BindingResult result) {
+        if (result.hasErrors()) {
+            return "members/createMemberForm";
+        }
+        
+        Address address = new Address(form.getCity(), form.getStreet(), form.getZipcode());
+        Member member = new Member();
+        member.setName(form.getName());
+        member.setAddress(address);
+        
+        memberService.join(member);
+        
+        return "redirect:/";
+    }
+}
+```
+
+여기서 `BindingResult` 는 Controller Parameter 가 Valid 체크가 실패했을 경우 `bindingResult.hasErrors()` 을 통해 에러를 담아서 되돌아갈 수 있습니다. 
+
+이 때 form 객체도 작성되었던 내용들이 같이 되돌아가서 html 페이지에서는 이전 작성 내용이 저장될 수 있습니다.
+
+`resources/templates/members/createMemberForm.html`
+
+타임리프 코드는 깃허브 참조
+
+```java
+th:object="${memberForm}"/th:field="*{name}"
+```
+
+위 타임리프 코드 부분처럼 memberForm Object 을 선언해준 태그 안에서 `th:field` 을 통해 memberForm 의 attribute 을 꺼내서 바로 사용할 수 있습니다.
+
+## 3. **회원 목록 조회**
+
+`MemberController` 에 `list` 메서드 추가 
+
+```java
+    //추가
+@GetMapping(value = "/members")
+public String list(Model model) {
+    List<Member> members = memberService.findMembers();
+    model.addAttribute("members", members);
+    return "members/memberList";
+}
+```
+
+조회한 상품을 뷰에 전달하기 위해 스프링 MVC가 제공하는 모델( `Model` ) 객체에 보관합니다.
+
+그리고 실행할 뷰 이름을 반환합니다.
+
+`resources/templates/members/memberList.html`
+
+타임리프 코드는 깃허브 참조
+
+```html
+${member.address?.city}
+```
+
+위처럼 타임리프에서 ?를 사용하면 null 을 무시합니다. 
+
+### 폼 객체 사용 vs 엔티티 직접 사용
+
+요구사항이 정말 단순할 경우에는 폼 객체 (ex - `MemberForm`) 없이 엔티티 ( ex - `Member` )을 직접 등록 화면과 수정 화면에서 사용해도 됩니다. 하지만 화면 요구사항이 복잡해지기 시작하면 엔티티에 화면을 처리하기 위한 기능이 점점 증가합니다. 
+
+결과적으로 엔티티는 점점 화면에 종속적으로 변하고, 이렇게 화면 기능 때문에 지저분해진 엔티티는 유지보수하기도 어려워집니다.
+
+실무에서 **엔티티는 핵심 비즈니스 로직만 가지고 있고, 화면을 위한 로직은 없어**야 합니다. 화면이나 API 에 맞는 폼 객체나 DTO 을 사용하는 것이 좋습니다! 이렇게 화면이나 API 요구사항을 이것들로 처리하고 엔티티는 최대한 순순하게 유지할 수 있습니다.
+
+## 4. **상품 등록**
+
+상품 등록 폼 `BookForm`
+
+```java
+@Getter @Setter
+public class BookForm {
+    
+    private Long id;
+    
+    private String name;
+    private int price;
+    private int stockQuantity;
+    
+    private String author;
+    private String isbn;
+}
+```
+
+상품 등록 컨트롤러 `ItemController`
+
+```java
+@Controller
+@RequiredArgsConstructor
+public class ItemController {
+    
+    private final ItemService itemService;
+    
+    @GetMapping(value = "/items/new")
+    public String createForm(Model model) {
+        model.addAttribute("form", new BookForm());
+        return "items/createItemForm";
+    }
+    
+    @PostMapping(value = "/items/new")
+    public String create(BookForm form) {
+        
+        Book book = new Book();
+        book.setName(form.getName());
+        book.setPrice(form.getPrice());
+        book.setStockQuantity(form.getStockQuantity());
+        book.setAuthor(form.getAuthor());
+        book.setIsbn(form.getIsbn());
+        
+        itemService.saveItem(book);
+        return "redirect:/items";
+    }
+}
+```
+
+상품 등록 폼에서 데이터를 입력하고 Submit 버튼을 클릭하면 `/items/new` 를 POST 방식으로 요청합니다.
+
+상품 저장이 끝나면 상품 목록 화면( `redirect:/items` )으로 리다이렉트합니다.
+
+`resources/templates/items/createItemForm.html`
+
+타임리프 코드는 깃허브 참조
+
+## 5. **상품 목록**
+
+상품 목록 컨트롤러 `ItemController` 에 `list` 메서드 추가
+
+```java
+/** 상품 목록*/
+@GetMapping(value = "/items")
+public String list(Model model){
+    List<Item> items = itemService.findItems();
+    model.addAttribute("items", items);
+    return "items/itemList";
+}
+```
+
+`model` 에 담아둔 상품 목록인 `items` 를 꺼내서 상품 정보를 출력합니다.
+
+`resources/templates/items/itemList.html`
+
+타임리프 코드는 깃허브 참조
+
+## 6. **상품 수정**
+
+`ItemController` 에 상품 수정과 관련된 `updateItemForm` , `updateItem` 메서드 추가 
+
+```java
+/** 상품 수정 폼 */
+    @GetMapping(value = "/items/{itemId}/edit")
+    public String updateItemForm(@PathVariable("itemId") Long itemId, Model model) {
+        Book item = (Book) itemService.findOne(itemId);
+
+        BookForm form = new BookForm();
+        form.setId(item.getId());
+        form.setName(item.getName());
+        form.setPrice(item.getPrice());
+        form.setStockQuantity(item.getStockQuantity());
+        form.setAuthor(item.getAuthor());
+        form.setIsbn(item.getIsbn());
+
+        model.addAttribute("form", form);
+        return "items/updateItemForm";
+    }
+
+    /** 상품 수정 */
+    @PostMapping(value = "/items/{itemId}/edit")
+    public String updateItem(@ModelAttribute("form") BookForm form) {
+        Book book = new Book();
+        book.setId(form.getId());
+        book.setName(form.getName());
+        book.setPrice(form.getPrice());
+        book.setStockQuantity(form.getStockQuantity());
+        book.setAuthor(form.getAuthor());
+        book.setIsbn(form.getIsbn());
+
+        itemService.saveItem(book);
+        return "redirect:/items";
+    }
+```
+
+### **상품 수정 폼 이동**
+
+1. 수정 버튼을 선택하면 `/items/{itemId}/edit` URL을 GET 방식으로 요청합니다.
+2. 그 결과로 `updateItemForm()` 메서드를 실행하는데 이 메서드는 `itemService.findOne(itemId)` 를 호출해서 수정할 상품을 조회합니다.
+3. 조회 결과를 모델 객체에 담아서 뷰( `items/updateItemForm` )에 전달합니다.
+
+### **상품 수정 실행**
+
+상품 수정 폼 HTML에는 상품의 id(hidden), 상품명, 가격, 수량 정보 있습니다.
+
+1. 상품 수정 폼에서 정보를 수정하고 Submit 버튼을 선택합니다.
+2. `/items/{itemId}/edit` URL을 POST 방식으로 요청하고 `updateItem()` 메서드를 실행합니다.
+3. 이 때 컨트롤러에 파라미터로 넘어온 `item` 엔티티 인스턴스는 현재 준영속 상태입니다. 따라서 영속성 컨텍스트 의 지원을 받을 수 없고 데이터를 수정해도 아직은 변경 감지 기능은 동작하지 않습니다.
+
+`resources/templates/items/updateItemForm.html`
+
+타임리프 코드는 깃허브 참조
